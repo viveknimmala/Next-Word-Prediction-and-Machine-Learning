@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Prediction and Translation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #444;
+        }
+        .container {
+            width: 80%;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .input-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 20px;
+        }
+        #myInput, #translationOutput {
+            width: calc(100% - 20px);
+            box-sizing: border-box;
+            padding: 10px;
+            margin: 0 auto;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+        #myInput {
+            margin-bottom: 10px;
+        }
+        #suggestion {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+            color: gray;
+            pointer-events: none;
+            user-select: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            z-index: 1;
+            opacity: 0.1; /* Lowered opacity value for more transparency */
+            margin-top: 2px; /* Adjust spacing below the input field */
+        }
+        #suggestion.active {
+            color: black;
+            pointer-events: auto;
+            cursor: pointer;
+            opacity: 1;
+        }
+        #translateButton {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #007BFF;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        #translateButton:hover {
+            background-color: #0056b3;
+        }
+        textarea[readonly] {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Word Prediction and Translation</h1>
+        <p>Type in the input field to get the next word prediction. Click on the prediction to insert it into the input.</p>
+
+        <div class="input-container">
+            <input type="text" id="myInput" oninput="handleInput()" placeholder="Type here..." autocomplete="off">
+            <span id="suggestion"></span>
+        </div>
+
+        <button id="translateButton" onclick="translateText()">Translate</button>
+
+        <h2>Translation Output</h2>
+        <textarea id="translationOutput" readonly placeholder="Translation will appear here..."></textarea>
+    </div>
+
+    <script>
+        let lastSpaceIndex = -1;
+        let ignoreNextInput = false;
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        const csrftoken = getCookie('csrftoken');
+
+        function handleInput() {
+            const input = document.getElementById("myInput");
+            let text = input.value;
+
+            if (text.length > 0 && text.charAt(text.length - 1) === ' ') {
+                let currentSpaceIndex = text.lastIndexOf(' ');
+
+                if (currentSpaceIndex > lastSpaceIndex && !ignoreNextInput) {
+                    let textUpToLastSpace = text.slice(0, currentSpaceIndex).trim();
+
+                    fetch('/predict/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-CSRFToken': csrftoken
+                        },
+                        body: `input_text=${encodeURIComponent(textUpToLastSpace)}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.prediction) {
+                            showSuggestion(data.prediction);
+                        } else {
+                            clearSuggestion();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        clearSuggestion();
+                    });
+
+                    lastSpaceIndex = currentSpaceIndex;
+                }
+            } else {
+                clearSuggestion();
+            }
+
+            if (text.charAt(text.length - 1) !== ' ') {
+                ignoreNextInput = false;
+            }
+        }
+
+        function showSuggestion(prediction) {
+            const suggestionElement = document.getElementById("suggestion");
+            const input = document.getElementById("myInput");
+
+            const cursorPosition = input.selectionStart;
+            const textBeforeCursor = input.value.substring(0, cursorPosition);
+            const textWidthBeforeCursor = getTextWidth(textBeforeCursor);
+
+            suggestionElement.textContent = prediction;
+            const suggestionWidth = getTextWidth(prediction);
+
+            suggestionElement.style.left = `${textWidthBeforeCursor + 10}px`; // Shift suggestion slightly to the right
+            suggestionElement.style.width = `${suggestionWidth + 10}px`;
+            suggestionElement.classList.add('active');
+
+            suggestionElement.onclick = function() {
+                insertPrediction(prediction);
+            };
+        }
+
+        function clearSuggestion() {
+            const suggestionElement = document.getElementById("suggestion");
+            suggestionElement.textContent = "";
+            suggestionElement.classList.remove('active');
+        }
+
+        function insertPrediction(prediction) {
+            const input = document.getElementById("myInput");
+            let text = input.value;
+            let lastSpaceIndex = text.lastIndexOf(' ');
+
+            if (lastSpaceIndex !== -1) {
+                text = text.slice(0, lastSpaceIndex + 1) + prediction;
+                input.value = text;
+                clearSuggestion();
+                input.focus();
+                input.selectionStart = input.selectionEnd = text.length;
+                ignoreNextInput = true;
+                document.getElementById("myInput").removeEventListener('input', handleInput);
+                document.getElementById("myInput").addEventListener('input', handleInput);
+            }
+        }
+
+        function getTextWidth(text) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = getComputedStyle(document.getElementById("myInput")).font;
+            return context.measureText(text).width;
+        }
+
+        function translateText() {
+            const input = document.getElementById("myInput").value;
+            fetch('/translate/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': csrftoken
+                },
+                body: `input_text=${encodeURIComponent(input)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.translation) {
+                    document.getElementById("translationOutput").value = data.translation;
+                } else {
+                    document.getElementById("translationOutput").value = "Translation failed.";
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById("translationOutput").value = "Error occurred during translation.";
+            });
+        }
+    </script>
+</body>
+</html>
